@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 外部への通信をブラウザに禁止させる。許可するのは、このフォルダ内のスクリプトと、ページ内で作ったデータ(blob:/data:)だけ。
+     connect-src に外部の宛先がないので、fetch・XMLHttpRequest・WebSocket などによる送信はすべてブラウザが止める。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file: blob: 'unsafe-inline' 'wasm-unsafe-eval'; worker-src blob:; connect-src blob: data:; img-src blob: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
 <title>オフライン OCR</title>
 <style>
   :root {
