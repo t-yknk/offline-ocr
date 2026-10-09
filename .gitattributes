@@ -1,0 +1,3 @@
+# assets/ は Base64 化した大きなデータ。差分表示や改行変換の対象にしない
+assets/*.js binary
+*.png binary

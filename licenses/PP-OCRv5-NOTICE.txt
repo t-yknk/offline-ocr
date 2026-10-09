@@ -1,0 +1,12 @@
+assets/det.js, assets/rec.js, assets/dict.js:
+  PP-OCRv5 mobile text detection / recognition models and character dictionary.
+
+  Models: PaddleOCR (PaddlePaddle / Baidu), Apache License 2.0
+          https://github.com/PaddlePaddle/PaddleOCR
+          Copyright in the model weights is held by Baidu and/or the respective
+          PaddleOCR rights holders.
+  ONNX conversion: RapidOCR (RapidAI) v3.9.2, Apache License 2.0
+          https://github.com/RapidAI/RapidOCR
+
+  The contents are unmodified; each file is stored Base64-encoded inside a .js wrapper.
+  The full text of the Apache License 2.0 is in Apache-License-2.0.txt in this folder.

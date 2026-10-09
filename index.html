@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>オフライン OCR</title>
+<style>
+  :root {
+    --bg: #f4f2ee; --panel: #ffffff; --ink: #1f2428; --muted: #6a7178;
+    --line: #dcd8d0; --accent: #0f5c4d; --accent-ink: #ffffff; --accent-soft: #e2efeb;
+    --warn: #a3401c; --warn-soft: #fbeae3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16191b; --panel: #1f2326; --ink: #e8e6e1; --muted: #9aa1a8;
+      --line: #343a3f; --accent: #58b9a4; --accent-ink: #0c1f1b; --accent-soft: #1d332e;
+      --warn: #f0a080; --warn-soft: #3a241c;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Yu Gothic UI", "Hiragino Sans", "Meiryo", "Noto Sans JP", sans-serif;
+    font-size: 15px; line-height: 1.6;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: .02em; }
+  header span { color: var(--muted); font-size: 13px; }
+  #drop {
+    border: 2px dashed var(--line); border-radius: 12px; background: var(--panel);
+    padding: 36px 16px; text-align: center; cursor: pointer; transition: .15s;
+  }
+  #drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  #drop strong { display: block; font-size: 17px; }
+  #drop small { color: var(--muted); }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 16px 0 6px; }
+  .hint { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+  .tools { margin: 0 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  body.has-items #drop { padding: 16px; }
+  body.has-items #drop strong { font-size: 15px; display: inline; margin-right: 10px; }
+  .bar label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+  .spacer { flex: 1; }
+  select, button {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  #status { flex: 1 1 240px; color: var(--muted); font-size: 13px; min-height: 1.6em; }
+  #status.err { color: var(--warn); background: var(--warn-soft); padding: 8px 12px; border-radius: 8px; }
+  .item {
+    display: grid; grid-template-columns: 200px 1fr; gap: 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .thumb { display: block; width: 100%; max-height: 220px; object-fit: contain; border-radius: 6px; background: var(--bg); cursor: zoom-in; }
+  .meta { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 6px; }
+  .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .name { font-weight: 600; word-break: break-all; }
+  .state { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--bg); color: var(--muted); }
+  .state.done { background: var(--accent-soft); color: var(--accent); }
+  .state.fail { background: var(--warn-soft); color: var(--warn); }
+  progress { width: 100%; height: 6px; accent-color: var(--accent); }
+  textarea {
+    width: 100%; min-height: 96px; resize: vertical; font: inherit; font-size: 14px;
+    color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px;
+  }
+  .head button { padding: 3px 10px; font-size: 13px; }
+  @media (max-width: 640px) { .item { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>オフライン OCR</h1>
+    <span>画像から文字を抜き出します。画像は外部に送信されません。</span>
+  </header>
+
+  <div id="drop" tabindex="0" role="button" aria-label="画像を選択">
+    <strong>ここに画像をドラッグ&ドロップ</strong>
+    <small>複数可 / クリックで選択 / Ctrl+V で貼り付け</small>
+    <input id="file" type="file" accept="image/*" multiple hidden>
+  </div>
+
+  <div class="bar" aria-label="読み取りの設定">
+    <label>文字の種類
+      <select id="lang">
+        <option value="auto">日本語(縦横は自動)</option>
+        <option value="jpn">日本語(横書きに固定)</option>
+        <option value="jpn_vert">日本語(縦書きに固定)</option>
+        <option value="eng">英数字のみ</option>
+      </select>
+    </label>
+    <label>抽出
+      <select id="pick">
+        <option value="all">すべての文字</option>
+        <option value="num">数字のみ</option>
+      </select>
+    </label>
+    <label>出力形式
+      <select id="fmt">
+        <option value="txt">テキスト (.txt)</option>
+        <option value="csv">カンマ区切り (.csv)</option>
+      </select>
+    </label>
+    <label id="nocommaL" hidden><input type="checkbox" id="nocomma" checked> 桁区切りのカンマを除く(12,800 → 12800)</label>
+  </div>
+  <p class="hint">抽出と出力形式は読み取り後でも切り替えられます(結果欄を手で編集していた場合は作り直されます)。文字の種類は、変更後に読み取る画像から反映されます。</p>
+
+  <div class="bar tools">
+    <div id="status" role="status" aria-live="polite"></div>
+    <button id="saveall" class="primary" disabled>すべて .txt で保存</button>
+    <button id="merge" disabled>1 つのファイルにまとめて保存</button>
+    <button id="clear" disabled>クリア</button>
+  </div>
+  <div id="list"></div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var A = window.OCR_ASSETS = window.OCR_ASSETS || {};
+  var items = [];          // 画像 1 枚ごとの状態(ファイル・読み取り結果・画面部品)
+  var queue = [];
+  var running = false;
+  var statusEl = $('status');
+
+  function setStatus(msg, err) { statusEl.textContent = msg || ''; statusEl.className = err ? 'err' : ''; }
+
+  function b64bytes(s) {
+    var bin = atob(s), n = bin.length, u = new Uint8Array(n);
+    for (var i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+  // エンジンとモデルは assets フォルダの .js として同梱し、<script> で読み込む(file:// でも通信なしで動かすため)
+  function loadAsset(name) {
+    if (A[name]) return Promise.resolve();
+    return new Promise(function (ok, ng) {
+      var sc = document.createElement('script');
+      sc.src = 'assets/' + name + '.js';
+      sc.onload = function () { A[name] ? ok() : ng(new Error('assets/' + name + '.js の内容が不正です')); };
+      sc.onerror = function () { ng(new Error('assets/' + name + '.js が見つかりません')); };
+      document.head.appendChild(sc);
+    });
+  }
+
+  // ---- AI-OCR(PP-OCRv5 + ONNX Runtime Web)。専用ワーカーで実行する ----
+  var ai = null, aiSeq = 0, aiWait = {};
+  function aiCall(msg, transfer) {
+    return new Promise(function (ok, ng) {
+      msg.id = ++aiSeq; aiWait[msg.id] = { ok: ok, ng: ng };
+      ai.postMessage(msg, transfer || []);
+    });
+  }
+  var aiReady = null;
+  function getAI() {
+    if (!aiReady) aiReady = startAI().catch(function (e) { aiReady = null; throw e; });
+    return aiReady;
+  }
+  async function startAI() {
+    await Promise.all(['ort_js', 'ort_mjs', 'ort_wasm', 'ai_worker', 'det', 'rec', 'dict', 'jpmask'].map(loadAsset));
+    var url = URL.createObjectURL(new Blob([b64bytes(A.ort_js), '\n;', b64bytes(A.ai_worker)], { type: 'application/javascript' }));
+    var w = new Worker(url);
+    w.onmessage = function (e) {
+      var d = e.data;
+      if (d.type === 'progress') { if (current) current.bar.value = d.p; return; }
+      var h = aiWait[d.id]; if (!h) return;
+      delete aiWait[d.id];
+      if (d.type === 'error') h.ng(new Error(d.message)); else h.ok(d.result);
+    };
+    w.onerror = function (e) {
+      Object.keys(aiWait).forEach(function (k) { aiWait[k].ng(new Error('AI エンジンでエラーが発生しました: ' + (e.message || ''))); delete aiWait[k]; });
+    };
+    ai = w;
+    try {
+      await aiCall({
+        type: 'init', mjs: b64bytes(A.ort_mjs), wasm: b64bytes(A.ort_wasm),
+        det: b64bytes(A.det), rec: b64bytes(A.rec), dict: new TextDecoder().decode(b64bytes(A.dict)), jpmask: b64bytes(A.jpmask)
+      });
+    } catch (e) { w.terminate(); ai = null; throw e; }
+    Object.keys(A).forEach(function (k) { delete A[k]; });   // 読み込み済みのデータを解放
+  }
+
+  var current = null;
+  function clean(t) { return t.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').trim(); }
+  function cleanCell(t) { return t.replace(/\s+/g, ' ').trim(); }
+  // 符号は英数字の直後にない場合だけ数値の一部とみなす(INV-2026 の「-」は符号にしない)
+  var reNum = /(?<![\d.,])(?:(?<![A-Za-z\d])[-+])?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\d,])|(?<![\d.])(?:(?<![A-Za-z\d])[-+])?\d+(?:\.\d+)?/g;
+  function nums(t) {
+    t = t.replace(/[\uff10-\uff19\uff0c\uff0e\uff0d\uff0b]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+         .replace(/(\d)\s+(?=[,.]\d)|(\d[,.])\s+(?=\d)/g, '$1$2');
+    var m = t.match(reNum) || [];
+    return $('nocomma').checked ? m.map(function (x) { return x.replace(/,/g, ''); }) : m;
+  }
+  function csvq(v) { return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function rowsOf(it) {
+    var num = $('pick').value === 'num';
+    return it.lines.map(function (cells) {
+      if (num) return cells.reduce(function (a, c) { return a.concat(nums(c)); }, []);
+      return cells.map(cleanCell).filter(Boolean);
+    }).filter(function (r) { return r.length; });
+  }
+  function render(it) {
+    var num = $('pick').value === 'num', csv = $('fmt').value === 'csv';
+    if (csv) it.area.value = rowsOf(it).map(function (r) { return r.map(csvq).join(','); }).join('\n');
+    else if (num) it.area.value = rowsOf(it).map(function (r) { return r.join(' '); }).join('\n');
+    else it.area.value = clean(it.raw);
+    fit(it.area);
+  }
+  function fit(area) {
+    area.style.height = 'auto';
+    area.style.height = Math.min(Math.max(area.scrollHeight + 2, 96), 420) + 'px';
+  }
+  function renderAll() {
+    $('nocommaL').hidden = $('pick').value !== 'num';
+    $('saveall').textContent = 'すべて ' + ext() + ' で保存';
+    items.forEach(function (i) { if (i.finished && i.lines) render(i); });
+  }
+  function ext() { return $('fmt').value === 'csv' ? '.csv' : '.txt'; }
+  // CSV は Excel で文字化けしないよう BOM 付き UTF-8・CRLF で保存
+  function fileBody(text) { return $('fmt').value === 'csv' ? '\ufeff' + text.replace(/\r?\n/g, '\r\n') + '\r\n' : text; }
+  function fileBlob(text) { return new Blob([fileBody(text)], { type: ($('fmt').value === 'csv' ? 'text/csv' : 'text/plain') + ';charset=utf-8' }); }
+
+  async function run() {
+    if (running) return;
+    running = true;
+    while (queue.length) {
+      var it = queue.shift();
+      if (it.removed) continue;
+      var lang = $('lang').value;
+      try {
+        await getAI();
+        current = it;
+        setState(it, '読み取り中', '');
+        it.bar.value = 0; it.bar.hidden = false;
+        var left = queue.filter(function (q) { return !q.removed; }).length;
+        var done = items.filter(function (i) { return i.finished; }).length;
+        setStatus('読み取り中 ' + (done + 1) + ' / ' + (done + 1 + left) + ' 件: ' + it.name);
+        var bmp = await createImageBitmap(it.file);
+        var a = await aiCall({ type: 'run', bitmap: bmp, vertical: lang === 'auto' ? 'auto' : lang === 'jpn_vert', charset: lang === 'eng' ? 'en' : 'jp' }, [bmp]);
+        it.raw = a.raw;
+        it.lines = a.lines;
+        it.dir.textContent = (a.vertical ? '縦書きとして読み取り' : '横書きとして読み取り') + (a.zoomed ? '・文字が小さいため拡大して読み取り' : '');
+        render(it);
+        setState(it, it.raw.trim() ? '完了' : '文字なし', it.raw.trim() ? 'done' : 'fail');
+      } catch (e) {
+        console.error(e);
+        setState(it, '失敗', 'fail');
+        it.area.value = '';
+        it.area.placeholder = '読み取れませんでした: ' + (e && e.message ? e.message : e);
+      }
+      it.bar.hidden = true;
+      it.finished = true;
+      current = null;
+      refresh();
+    }
+    running = false;
+    var n = items.filter(function (i) { return i.finished; }).length;
+    setStatus(n ? n + ' 件の読み取りが完了しました。' : '');
+  }
+
+  function setState(it, label, cls) { it.badge.textContent = label; it.badge.className = 'state ' + cls; }
+
+  function txtName(it) { return it.name.replace(/\.[^.\\/]+$/, '') + ext(); }
+
+  function uniqueNames() {
+    var seen = {};
+    return items.filter(function (i) { return i.finished; }).map(function (it) {
+      var n = txtName(it), base = n.slice(0, -4), k = 1;
+      while (seen[n.toLowerCase()]) n = base + '_' + (++k) + ext();
+      seen[n.toLowerCase()] = 1;
+      return { name: n, text: fileBody(it.area.value), raw: it.area.value, src: it.name };
+    });
+  }
+
+  function add(files) {
+    var list = Array.prototype.filter.call(files, function (f) { return /^image\//.test(f.type) || /\.(png|jpe?g|bmp|gif|webp|tiff?)$/i.test(f.name); });
+    if (!list.length) { setStatus('画像ファイルが見つかりませんでした。', true); return; }
+    list.sort(function (a, b) { return a.name.localeCompare(b.name, 'ja', { numeric: true }); });
+    list.forEach(function (f) {
+      var it = { file: f, name: f.name || ('貼り付け画像_' + (items.length + 1) + '.png'), text: '' };
+      var el = document.createElement('div'); el.className = 'item';
+      var left = document.createElement('div');
+      var img = document.createElement('img'); img.className = 'thumb'; img.alt = '';
+      img.src = URL.createObjectURL(f);
+      var meta = document.createElement('div'); meta.className = 'meta';
+      meta.textContent = Math.max(1, Math.round(f.size / 1024)) + ' KB';
+      var dir = document.createElement('div'); dir.className = 'meta';
+      var link = document.createElement('a'); link.href = img.src; link.target = '_blank'; link.rel = 'noopener';
+      link.title = '別のタブで大きく表示'; link.appendChild(img);
+      left.appendChild(link); left.appendChild(meta); left.appendChild(dir);
+      var right = document.createElement('div');
+      var head = document.createElement('div'); head.className = 'head';
+      var name = document.createElement('span'); name.className = 'name'; name.textContent = it.name;
+      var badge = document.createElement('span'); badge.className = 'state'; badge.textContent = '待機中';
+      var sp = document.createElement('span'); sp.className = 'spacer';
+      var bCopy = btn('コピー', function () { copy(it.area.value, bCopy); });
+      var bSave = btn('保存', function () { save(fileBlob(it.area.value), txtName(it)); });
+      var bRedo = btn('再読み取り', function () {
+        if (queue.indexOf(it) < 0 && current !== it) { it.finished = false; setState(it, '待機中', ''); queue.push(it); refresh(); run(); }
+      });
+      var bDel = btn('削除', function () {
+        it.removed = true; items.splice(items.indexOf(it), 1); el.remove(); URL.revokeObjectURL(img.src); refresh();
+      });
+      [name, badge, sp, bCopy, bSave, bRedo, bDel].forEach(function (x) { head.appendChild(x); });
+      var bar = document.createElement('progress'); bar.max = 1; bar.value = 0; bar.hidden = true;
+      var area = document.createElement('textarea'); area.spellcheck = false;
+      area.placeholder = '読み取り結果がここに表示されます(編集できます)';
+      right.appendChild(head); right.appendChild(bar); right.appendChild(area);
+      el.appendChild(left); el.appendChild(right);
+      it.el = el; it.dir = dir; it.badge = badge; it.bar = bar; it.area = area;
+      items.push(it); queue.push(it); $('list').appendChild(el);
+    });
+    refresh(); run();
+  }
+
+  function btn(label, fn) { var b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = fn; return b; }
+
+  function copy(text, b) {
+    var done = function () { var t = b.textContent; b.textContent = 'コピー済み'; setTimeout(function () { b.textContent = t; }, 1200); };
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else fallback();
+    function fallback() {
+      var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+      ta.select(); try { document.execCommand('copy'); done(); } catch (e) {} ta.remove();
+    }
+  }
+
+  function save(blob, name) {
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  function refresh() {
+    var n = items.filter(function (i) { return i.finished; }).length;
+    $('saveall').disabled = $('merge').disabled = !n;
+    $('clear').disabled = !items.length;
+    document.body.classList.toggle('has-items', items.length > 0);
+  }
+
+  function stamp() {
+    var d = new Date(), p = function (n) { return ('0' + n).slice(-2); };
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  // 画像ごとのファイルを 1 つずつ順番に保存する(ブラウザの連続ダウンロード制限を避けるため間隔を空ける)
+  $('saveall').onclick = function () {
+    var fs = uniqueNames(), type = ($('fmt').value === 'csv' ? 'text/csv' : 'text/plain') + ';charset=utf-8';
+    fs.forEach(function (f, i) {
+      setTimeout(function () {
+        save(new Blob([f.text], { type: type }), f.name);
+        setStatus('保存中: ' + (i + 1) + ' / ' + fs.length + ' 件');
+      }, i * 400);
+    });
+  };
+  $('merge').onclick = function () {
+    var fs = uniqueNames(), t;
+    if ($('fmt').value === 'csv') {
+      // 1 列目に元画像のファイル名を付けて 1 つの表にまとめる
+      t = fs.map(function (f) {
+        return f.raw.split('\n').filter(Boolean).map(function (l) { return csvq(f.src) + ',' + l; }).join('\n');
+      }).filter(Boolean).join('\n');
+    } else {
+      t = fs.map(function (f) { return '===== ' + f.src + ' =====\n' + f.raw; }).join('\n\n') + '\n';
+    }
+    save(fileBlob(t), 'ocr_' + stamp() + ext());
+  };
+  $('clear').onclick = function () {
+    items.forEach(function (i) { i.removed = true; }); items = []; queue.length = 0;
+    $('list').innerHTML = ''; refresh(); if (!running) setStatus('');
+  };
+
+  ['pick', 'fmt', 'nocomma'].forEach(function (id) { $(id).addEventListener('change', renderAll); });
+
+  // 設定を次回も引き継ぐ(保存できない環境では毎回初期値になるだけ)
+  var KEY = 'offline-ocr-settings';
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    ['lang', 'pick', 'fmt'].forEach(function (id) { if (saved[id] && $(id).querySelector('option[value="' + saved[id] + '"]')) $(id).value = saved[id]; });
+    if (typeof saved.nocomma === 'boolean') $('nocomma').checked = saved.nocomma;
+  } catch (e) {}
+  ['lang', 'pick', 'fmt', 'nocomma'].forEach(function (id) {
+    $(id).addEventListener('change', function () {
+      try { localStorage.setItem(KEY, JSON.stringify({ lang: $('lang').value, pick: $('pick').value, fmt: $('fmt').value, nocomma: $('nocomma').checked })); } catch (e) {}
+    });
+  });
+  renderAll();
+
+  // 開いた時点でエンジンを準備しておく(1 枚目の待ち時間を減らし、ファイルの欠けもすぐ分かる)
+  setStatus('AI エンジンを準備中…');
+  getAI().then(function () { if (!running && !items.length) setStatus('準備完了。画像を入れてください。'); },
+    function (e) { setStatus('AI エンジンを開始できません: ' + (e && e.message ? e.message : e) + ' / index.html と assets フォルダが同じ場所にそろっているか確認してください。', true); });
+
+  var drop = $('drop'), input = $('file');
+  drop.onclick = function () { input.click(); };
+  drop.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
+  input.onchange = function () { add(input.files); input.value = ''; };
+  ['dragenter', 'dragover'].forEach(function (t) {
+    window.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); });
+  });
+  ['dragleave', 'drop'].forEach(function (t) {
+    window.addEventListener(t, function (e) { e.preventDefault(); if (t === 'drop' || e.relatedTarget === null) drop.classList.remove('over'); });
+  });
+  window.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files.length) add(e.dataTransfer.files); });
+  window.addEventListener('paste', function (e) {
+    var f = e.clipboardData && e.clipboardData.files;
+    if (f && f.length) { e.preventDefault(); add(f); }
+  });
+})();
+</script>
+</body>
+</html>
